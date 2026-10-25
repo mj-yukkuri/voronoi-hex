@@ -1,0 +1,821 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ボロノイ HEX</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@800&display=swap">
+<style>
+  /* 盤面を主役に、右（狭い画面では下）に操作パネル */
+  :root {
+    --bg: #e9ecf1; --panel: #ffffff; --ink: #1d2230; --muted: #687184; --rule: #dde1e8;
+    --red: #d64545; --red-soft: #f4cdcd; --red-ink: #8a1f1f;
+    --blue: #3a6fd8; --blue-soft: #cbd9f6; --blue-ink: #1d3f86;
+    --cell: #dfe3ea; --cell-hover: #ccd3de; --line: #a7b0bf;
+    --btn: #1d2230; --btn-ink: #ffffff; --btn2: #d6dbe4; --neutral: #e3e7ee;
+    --last: #111520; --win: #f2c230; --shadow: rgba(20, 30, 50, .10);
+    --font-display: "M PLUS Rounded 1c", "Hiragino Maru Gothic ProN", "Yu Gothic UI", sans-serif;
+    --font-body: "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #13161c; --panel: #1c2029; --ink: #e6e9ef; --muted: #98a1b2; --rule: #2c3240;
+      --red: #e35d5d; --red-soft: #4b2528; --red-ink: #ffc9c9;
+      --blue: #5b8ef0; --blue-soft: #233455; --blue-ink: #cddcff;
+      --cell: #2a2f3a; --cell-hover: #363d4b; --line: #4b5466;
+      --btn: #e6e9ef; --btn-ink: #13161c; --btn2: #2f3542; --neutral: #262b36;
+      --last: #ffffff; --win: #f5cf4a; --shadow: rgba(0, 0, 0, .4);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #13161c; --panel: #1c2029; --ink: #e6e9ef; --muted: #98a1b2; --rule: #2c3240;
+    --red: #e35d5d; --red-soft: #4b2528; --red-ink: #ffc9c9;
+    --blue: #5b8ef0; --blue-soft: #233455; --blue-ink: #cddcff;
+    --cell: #2a2f3a; --cell-hover: #363d4b; --line: #4b5466;
+    --btn: #e6e9ef; --btn-ink: #13161c; --btn2: #2f3542; --neutral: #262b36;
+    --last: #ffffff; --win: #f5cf4a; --shadow: rgba(0, 0, 0, .4);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); }
+  .wrap { max-width: 1000px; margin: 0 auto; display: flex; gap: 20px; flex-wrap: wrap; justify-content: center;
+    padding-block: 16px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .board { flex: 1 1 560px; max-width: 640px; min-width: 0; }
+  svg { width: 100%; height: auto; display: block; touch-action: manipulation; }
+  .panel { flex: 1 1 280px; max-width: 340px; background: var(--panel); border-radius: 12px; padding: 16px;
+    box-shadow: 0 1px 4px var(--shadow); align-self: flex-start; min-width: 0; }
+  h1 { font-family: var(--font-display); font-size: 24px; letter-spacing: .02em; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+  .status { font-size: 17px; font-weight: bold; padding: 10px 12px; border-radius: 8px; margin-bottom: 6px; background: var(--neutral); }
+  .info { font-size: 12px; color: var(--muted); min-height: 1.4em; margin-bottom: 8px; }
+  .status.red { background: var(--red-soft); color: var(--red-ink); }
+  .status.blue { background: var(--blue-soft); color: var(--blue-ink); }
+  label { display: block; font-size: 13px; margin: 10px 0 4px; }
+  input[type=range] { width: 100%; }
+  select { width: 100%; padding: 6px; font-size: 14px; }
+  .row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  button { flex: 1; padding: 9px 10px; font-size: 14px; border: none; border-radius: 8px; cursor: pointer;
+    background: var(--btn); color: var(--btn-ink); font-family: inherit; }
+  button.secondary { background: var(--btn2); color: var(--ink); }
+  button:disabled { opacity: .4; cursor: default; }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+  .check { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-top: 10px; }
+  .rules { font-size: 12.5px; color: var(--muted); line-height: 1.7; margin-top: 14px; border-top: 1px solid var(--rule); padding-top: 10px; }
+  .r { color: var(--red); font-weight: bold; } .b { color: var(--blue); font-weight: bold; }
+  polygon.cell { stroke: var(--line); stroke-width: 1.2; cursor: pointer; transition: fill .12s; }
+  polygon.cell.empty { fill: var(--cell); }
+  polygon.cell.empty:hover { fill: var(--cell-hover); }
+  polygon.cell.p1 { fill: var(--red); }
+  polygon.cell.p2 { fill: var(--blue); }
+  polygon.cell.last { stroke: var(--last); stroke-width: 3; }
+  polygon.cell.win { stroke: var(--win); stroke-width: 4; }
+  @media (prefers-reduced-motion: reduce) { polygon.cell { transition: none; } }
+  .preview-r { fill: var(--red-soft) !important; }
+  .preview-b { fill: var(--blue-soft) !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="board"><svg id="svg" viewBox="-20 -20 640 640"></svg></div>
+  <div class="panel">
+    <h1>ボロノイ HEX</h1>
+    <p class="sub">ランダムなボロノイ図の上で遊ぶ HEX</p>
+    <div id="status" class="status">—</div>
+    <div id="info" class="info"></div>
+
+    <label>セル数: <span id="nVal"></span></label>
+    <input id="n" type="range" min="20" max="250" step="2" value="160">
+
+    <label>整い具合（ロイド緩和の回数）: <span id="lVal"></span></label>
+    <input id="lloyd" type="range" min="0" max="12" value="2">
+
+    <label>対戦モード</label>
+    <select id="mode">
+      <option value="pvp">2人で対戦</option>
+      <option value="cpu2">あなた(赤・先手) vs CPU(青)</option>
+      <option value="cpu1">CPU(赤・先手) vs あなた(青)</option>
+      <option value="watch">CPU vs CPU（観戦）</option>
+    </select>
+
+    <label id="levelLabel">CPUの強さ</label>
+    <select id="level">
+      <option value="0">かんたん（1手読み）</option>
+      <option value="1000">ふつう（1秒思考）</option>
+      <option value="3000" selected>つよい（3秒思考）</option>
+      <option value="8000">最強（8秒思考）</option>
+    </select>
+    <div id="watchOnly" hidden>
+      <label>青CPUの強さ</label>
+      <select id="levelBlue">
+        <option value="0">かんたん（1手読み）</option>
+        <option value="1000">ふつう（1秒思考）</option>
+        <option value="3000" selected>つよい（3秒思考）</option>
+        <option value="8000">最強（8秒思考）</option>
+      </select>
+      <div class="row"><button id="pauseBtn" class="secondary">一時停止</button></div>
+    </div>
+
+    <div class="check"><input id="sym" type="checkbox" checked><label for="sym" style="margin:0">対称ボード（対角線で鏡映して公平に）</label></div>
+    <div class="check"><input id="swap" type="checkbox" checked><label for="swap" style="margin:0">スワップルールあり</label></div>
+
+    <div class="row">
+      <button id="startBtn">ゲーム開始</button>
+      <button id="newBtn" class="secondary">新しい盤面</button>
+    </div>
+    <div class="row">
+      <button id="undoBtn" class="secondary">1手戻す</button>
+      <button id="swapBtn" class="secondary">スワップ</button>
+    </div>
+
+    <div class="rules">
+      <span class="r">赤</span>は<b>上辺と下辺</b>を、<span class="b">青</span>は<b>左辺と右辺</b>を、自分の色のセルでつなげたら勝ち。
+      隣り合う＝辺を共有しているセルです。<br>
+      スワップルール：先手の初手のあと、後手は1回だけ「そのセルを自分の色にもらう」ことができます。
+    </div>
+  </div>
+</div>
+
+<script id="engine">
+// ===== 思考エンジン：モンテカルロ木探索 + RAVE =====
+// Web Worker でもメインスレッドでも動くよう、DOM に依存しない形で書く。
+// graph = { n, adj: [[隣接セル]], sides: [[盤の辺 -1..-4]] }
+function HexEngine(graph) {
+  const n = graph.n, V = n + 4;          // n..n+3 は盤の辺を表す仮想ノード（上・右・下・左）
+  const TOP = n, RIGHT = n + 1, BOTTOM = n + 2, LEFT = n + 3;
+  const sideNode = s => n + (-s - 1);
+  const nbr = [];
+  for (let i = 0; i < n; i++) nbr.push(graph.adj[i].concat(graph.sides[i].map(sideNode)));
+  for (let k = 0; k < 4; k++) nbr.push([]);
+  for (let i = 0; i < n; i++) for (const s of graph.sides[i]) nbr[sideNode(s)].push(i);
+  const nb = nbr.map(a => Int32Array.from(a));
+  const adjSet = nbr.map(a => new Set(a));
+
+  // ブリッジ表：x が「自分の石 a,b（または石と辺）を結ぶ共通の空きセル」の1つであるとき、
+  // 相手に x を取られたら残りの共通セルで繋ぎ直す（プレイアウトの質を大きく上げる）
+  const bridges = Array.from({ length: n }, () => []);
+  for (let x = 0; x < n; x++) {
+    const ns = nbr[x];
+    for (let p = 0; p < ns.length; p++) for (let q = p + 1; q < ns.length; q++) {
+      const a = ns[p], b = ns[q];
+      if ((a >= n && b >= n) || adjSet[a].has(b)) continue;
+      const common = nbr[a].filter(c => c < n && adjSet[b].has(c));
+      if (common.length >= 2) bridges[x].push({ a, b, common: Int32Array.from(common) });
+    }
+  }
+
+  let seed = (Math.random() * 2 ** 31) | 1;
+  const rnd = () => { seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; return (seed >>> 0) / 4294967296; };
+  const now = () => performance.now();
+
+  function full(board) {
+    const b = new Int8Array(V); b.set(board);
+    b[TOP] = 1; b[BOTTOM] = 1; b[LEFT] = 2; b[RIGHT] = 2;
+    return b;
+  }
+
+  const stamp = new Int32Array(V), stack = new Int32Array(V); let gen = 0;
+  function connected(board, p) {
+    gen++;
+    const src = p === 1 ? TOP : LEFT, dst = p === 1 ? BOTTOM : RIGHT;
+    let sp = 0; stack[sp++] = src; stamp[src] = gen;
+    while (sp) {
+      const ns = nb[stack[--sp]];
+      for (let k = 0; k < ns.length; k++) {
+        const v = ns[k];
+        if (v === dst) return true;
+        if (v < n && stamp[v] !== gen && board[v] === p) { stamp[v] = gen; stack[sp++] = v; }
+      }
+    }
+    return false;
+  }
+
+  function saveBridge(board, x, me) {
+    const list = bridges[x]; let cand = -1, cnt = 0;
+    for (let t = 0; t < list.length; t++) {
+      const br = list[t];
+      if (board[br.a] !== me || board[br.b] !== me) continue;
+      let empty = -1, ne = 0, mine = false;
+      const cm = br.common;
+      for (let k = 0; k < cm.length; k++) {
+        const v = board[cm[k]];
+        if (v === 0) { ne++; empty = cm[k]; } else if (v === me) { mine = true; break; }
+      }
+      if (!mine && ne === 1) { cnt++; if (rnd() * cnt < 1) cand = empty; }
+    }
+    return cand;
+  }
+
+  // 盤が埋まるまでランダムに打つ（ブリッジは守る）。HEX は引き分けがないので埋めれば勝者が決まる
+  const empt = new Int32Array(n), pos = new Int32Array(n);
+  function playout(board, toMove, last) {
+    let m = 0;
+    for (let i = 0; i < n; i++) if (board[i] === 0) { empt[m] = i; pos[i] = m; m++; }
+    let p = toMove;
+    while (m > 0) {
+      let mv = last >= 0 ? saveBridge(board, last, p) : -1;
+      if (mv < 0) mv = empt[(rnd() * m) | 0];
+      const i = pos[mv], e = empt[m - 1]; empt[i] = e; pos[e] = i; m--;
+      board[mv] = p; last = mv; p = 3 - p;
+    }
+    return connected(board, 1) ? 1 : 2;
+  }
+
+  // 木のノード：p = この局面で手番のプレイヤー。子の統計は配列でまとめて持つ（省メモリ）
+  function makeNode(board, p) {
+    const ms = [];
+    for (let i = 0; i < n; i++) if (board[i] === 0) ms.push(i);
+    const k = ms.length;
+    return { p, moves: Int32Array.from(ms), N: new Float64Array(k), W: new Float64Array(k),
+      AN: new Float64Array(k), AW: new Float64Array(k), kids: new Array(k).fill(null), total: 0 };
+  }
+
+  const RAVE_K = 1000, C = 0.1, EXPAND = 3;
+  function select(node) {
+    let best = 0, bv = -Infinity;
+    const lt = Math.log(node.total + 1);
+    for (let j = 0; j < node.moves.length; j++) {
+      const N = node.N[j], AN = node.AN[j];
+      let v;
+      if (N + AN === 0) v = 1 + rnd();
+      else {
+        const q = N > 0 ? node.W[j] / N : 0.5, aq = AN > 0 ? node.AW[j] / AN : 0.5;
+        const beta = AN / (AN + N + AN * N / RAVE_K);
+        v = (1 - beta) * q + beta * aq + C * Math.sqrt(lt / (N + 1));
+      }
+      if (v > bv) { bv = v; best = j; }
+    }
+    return best;
+  }
+
+  function search(board0, toMove, timeMs) {
+    const root = makeNode(board0, toMove);
+    const board = new Int8Array(V), path = [], idx = [];
+    const t0 = now(); let it = 0;
+    while (root.moves.length) {
+      if ((it & 15) === 0 && now() - t0 > timeMs) break;
+      it++;
+      board.set(board0);
+      path.length = 0; idx.length = 0;
+      let node = root, last = -1;
+      for (;;) {
+        const j = select(node), mv = node.moves[j];
+        board[mv] = node.p; last = mv; path.push(node); idx.push(j);
+        let kid = node.kids[j];
+        if (!kid) {
+          if (node.N[j] >= EXPAND && node.moves.length > 1) kid = node.kids[j] = makeNode(board, 3 - node.p);
+          else break;
+        }
+        node = kid;
+      }
+      const winner = playout(board, 3 - path[path.length - 1].p, last);
+      for (let d = 0; d < path.length; d++) {
+        const nd = path[d], j = idx[d], p = nd.p, won = winner === p ? 1 : 0;
+        nd.total++; nd.N[j]++; nd.W[j] += won;
+        const ms = nd.moves;   // AMAF：このプレイアウト中に p が打ったセルすべてを更新
+        for (let t = 0; t < ms.length; t++) if (board[ms[t]] === p) { nd.AN[t]++; nd.AW[t] += won; }
+      }
+    }
+    let best = 0;
+    for (let j = 1; j < root.moves.length; j++) if (root.N[j] > root.N[best]) best = j;
+    return { root, iters: it, move: root.moves[best], q: root.N[best] ? root.W[best] / root.N[best] : 0.5 };
+  }
+
+  function winningCells(b, p) {
+    const res = [];
+    for (let i = 0; i < n; i++) if (b[i] === 0) { b[i] = p; if (connected(b, p)) res.push(i); b[i] = 0; }
+    return res;
+  }
+
+  // mode: 'best' 最善手 / 'balanced' スワップされても困らない初手 / 'swapDecide' スワップするか判断
+  function think(board, toMove, timeMs, mode) {
+    const b = full(board);
+    if (mode === "swapDecide") {
+      const a = search(b, toMove, timeMs / 2);
+      const b2 = b.slice();
+      for (let i = 0; i < n; i++) if (b2[i] === 3 - toMove) b2[i] = toMove;
+      const s = search(b2, 3 - toMove, timeMs / 2);
+      const swapVal = 1 - s.q;
+      return swapVal > a.q ? { swap: true, winrate: swapVal, iters: a.iters + s.iters }
+                           : { move: a.move, winrate: a.q, iters: a.iters + s.iters };
+    }
+    const win = winningCells(b, toMove);
+    if (win.length) return { move: win[0], winrate: 1, iters: 0 };
+    const threat = winningCells(b, 3 - toMove);
+    if (threat.length === 1) {
+      const r = search(b, toMove, Math.min(timeMs, 300));
+      return { move: threat[0], winrate: r.q, iters: r.iters };
+    }
+    const r = search(b, toMove, timeMs);
+    if (mode === "balanced") {
+      const rt = r.root; let best = r.move, bd = Infinity;
+      for (let j = 0; j < rt.moves.length; j++) {
+        const v = rt.N[j] >= 50 ? rt.W[j] / rt.N[j] : rt.AN[j] ? rt.AW[j] / rt.AN[j] : 0;
+        const d = Math.abs(v - 0.5) + rnd() * 0.01;
+        if (d < bd) { bd = d; best = rt.moves[j]; }
+      }
+      return { move: best, winrate: 0.5, iters: r.iters };
+    }
+    return { move: r.move, winrate: r.q, iters: r.iters };
+  }
+
+  return { think };
+}
+</script>
+<script>
+const W = 600, H = 600;
+const SIDE = { TOP: -1, RIGHT: -2, BOTTOM: -3, LEFT: -4 };
+const EMPTY = 0, RED = 1, BLUE = 2;
+const GOALS = { [RED]: [SIDE.TOP, SIDE.BOTTOM], [BLUE]: [SIDE.LEFT, SIDE.RIGHT] };
+const NAME = { [RED]: "赤", [BLUE]: "青" };
+
+const $ = id => document.getElementById(id);
+const svg = $("svg");
+
+let cells = [];      // {site, poly, nb:Set, sides:Set}
+let owner = [];      // EMPTY / RED / BLUE
+let history = [];    // [{i, type:'move'|'swap'}]
+let turn = RED, winner = 0, winPath = [];
+let cpuTimer = null;
+
+// ---------- Voronoi（半平面クリッピングで各セルを作る） ----------
+function clipCell(sites, i) {
+  const [sx, sy] = sites[i];
+  // 頂点と「その頂点から出る辺のラベル」（隣のセル番号 or 盤の辺）
+  let poly = [
+    { x: 0, y: 0, l: SIDE.TOP }, { x: W, y: 0, l: SIDE.RIGHT },
+    { x: W, y: H, l: SIDE.BOTTOM }, { x: 0, y: H, l: SIDE.LEFT },
+  ];
+  // 近い母点から順に切っていき、残った多角形に届かない距離まで来たら打ち切る
+  const order = [];
+  for (let j = 0; j < sites.length; j++) if (j !== i) order.push([(sites[j][0] - sx) ** 2 + (sites[j][1] - sy) ** 2, j]);
+  order.sort((a, b) => a[0] - b[0]);
+  for (const [d2, j] of order) {
+    let r2 = 0;
+    for (const v of poly) r2 = Math.max(r2, (v.x - sx) ** 2 + (v.y - sy) ** 2);
+    if (d2 > 4 * r2) break;
+    const [tx, ty] = sites[j];
+    // 内側: (p - m)·(t - s) <= 0, m は中点
+    const nx = tx - sx, ny = ty - sy;
+    const c = (nx * (sx + tx) + ny * (sy + ty)) / 2;
+    const f = p => nx * p.x + ny * p.y - c;
+    const out = [];
+    for (let k = 0; k < poly.length; k++) {
+      const P = poly[k], Q = poly[(k + 1) % poly.length];
+      const fp = f(P), fq = f(Q);
+      const pin = fp <= 0, qin = fq <= 0;
+      const cut = () => { const t = fp / (fp - fq); return { x: P.x + (Q.x - P.x) * t, y: P.y + (Q.y - P.y) * t }; };
+      if (pin && qin) out.push(P);
+      else if (pin && !qin) { out.push(P); out.push({ ...cut(), l: j }); }
+      else if (!pin && qin) out.push({ ...cut(), l: P.l });
+    }
+    poly = out;
+    if (poly.length < 3) break;
+  }
+  return poly;
+}
+
+function polyCentroid(poly) {
+  let a = 0, cx = 0, cy = 0;
+  for (let k = 0; k < poly.length; k++) {
+    const p = poly[k], q = poly[(k + 1) % poly.length];
+    const cr = p.x * q.y - q.x * p.y;
+    a += cr; cx += (p.x + q.x) * cr; cy += (p.y + q.y) * cr;
+  }
+  a /= 2;
+  return Math.abs(a) < 1e-9 ? [poly[0].x, poly[0].y] : [cx / (6 * a), cy / (6 * a)];
+}
+
+function generate(n, lloydIters, symmetric) {
+  // 対称盤では「鏡像どうしのセルが対角線上で接する」と4セルが1点に集まり
+  // 引き分けが起こりうるので、そうなったら作り直す。短い辺が消しきれなかった場合も作り直す
+  let fallback = null;
+  for (let tries = 0; tries < 8; tries++) {
+    const ok = buildCells(n, lloydIters, symmetric);
+    const symOk = !symmetric || !cells.some((c, i) => c.mirror !== i && c.nb.has(c.mirror));
+    if (symOk && ok) return;
+    if (symOk && !fallback) fallback = cells;
+  }
+  if (fallback) cells = fallback;
+}
+
+// 辺の長さの下限：平均的なセルの大きさに対する割合
+const MIN_EDGE_RATIO = 0.3;
+
+// 短すぎる辺（セル同士・セルと盤の辺）を見つけて、母点を少しずつ動かして伸ばす。
+// 2つのセルの間の辺が短いのは、周りの4つの母点がほぼ同じ円の上に乗っているとき。
+// その2つの母点を互いに近づけると、2セル間の辺は長くなる。
+function stretchShortEdges(sites, mirror, n, symmetric) {
+  const s = W / Math.sqrt(n), minLen = s * MIN_EDGE_RATIO;
+  for (let iter = 0; iter < 300; iter++) {
+    const disp = sites.map(() => [0, 0]);
+    let found = 0;
+    for (let i = 0; i < sites.length; i++) {
+      const poly = clipCell(sites, i);
+      for (let k = 0; k < poly.length; k++) {
+        const p = poly[k], q = poly[(k + 1) % poly.length];
+        const len = Math.hypot(q.x - p.x, q.y - p.y);
+        const j = p.l, step = s * 0.03;  // 1回に動かす量は小さく一定に（大きいと全体が崩れる）
+        const mirrorTouch = symmetric && j >= 0 && j !== i && mirror[i] === j;
+        if (len < 1e-6 || (len >= minLen && !mirrorTouch)) continue;
+        if (j >= 0) {
+          if (j < i) continue;           // 同じ辺は両側のセルに現れるので片方だけ処理
+          const dx = sites[j][0] - sites[i][0], dy = sites[j][1] - sites[i][1];
+          // 鏡像ペアは対角線上で接してはいけないので、逆に引き離す
+          const sgn = symmetric && mirror[i] === j ? -1 : 1;
+          const d = Math.hypot(dx, dy) || 1, ux = sgn * dx / d * step, uy = sgn * dy / d * step;
+          disp[i][0] += ux; disp[i][1] += uy;
+          disp[j][0] -= ux; disp[j][1] -= uy;
+        } else {                         // 盤の辺に少しだけ触れている → 辺に寄せて接触を広げる
+          const d = { [SIDE.TOP]: [0, -1], [SIDE.BOTTOM]: [0, 1], [SIDE.LEFT]: [-1, 0], [SIDE.RIGHT]: [1, 0] }[j];
+          disp[i][0] += d[0] * step; disp[i][1] += d[1] * step;
+        }
+        found++;
+      }
+    }
+    if (!found) return true;
+    // 対称盤なら移動量も鏡映で平均して対称性を保つ
+    const next = sites.map((p, i) => {
+      const a = disp[i], b = symmetric ? disp[mirror[i]] : [a[1], a[0]];
+      const dx = (a[0] + b[1]) / 2, dy = (a[1] + b[0]) / 2;
+      return [Math.min(W - 0.5, Math.max(0.5, p[0] + dx)), Math.min(H - 0.5, Math.max(0.5, p[1] + dy))];
+    });
+    for (let i = 0; i < sites.length; i++) {
+      sites[i] = !symmetric || mirror[i] > i ? next[i]
+        : mirror[i] === i ? [(next[i][0] + next[i][1]) / 2, (next[i][0] + next[i][1]) / 2]
+        : [next[mirror[i]][1], next[mirror[i]][0]];
+    }
+  }
+  return false;
+}
+
+function buildCells(n, lloydIters, symmetric) {
+  const rnd = (lo, hi) => lo + Math.random() * (hi - lo);
+  let sites = [], mirror = [];
+  // 母点どうしが近すぎると短い辺だらけになるので、ある程度離して置く（ポアソンディスク風）
+  let minD = W / Math.sqrt(n) * 0.6, fails = 0;
+  const farEnough = (x, y) => sites.every(([a, b]) => (a - x) ** 2 + (b - y) ** 2 >= minD * minD);
+  const tryPoint = (x, y) => {
+    if (farEnough(x, y)) { fails = 0; return true; }
+    if (++fails > 200) { minD *= 0.9; fails = 0; }
+    return false;
+  };
+  if (symmetric) {
+    // 対角線 y=x について鏡映 → 赤(上下)と青(左右)の条件が入れ替わる対称な盤。
+    // 対角線上にもセルを並べて、鏡像ペアが対角線をはさんで接しないようにする
+    let k = Math.min(n, Math.round(1.5 * Math.sqrt(n)));
+    if ((n - k) % 2) k++;              // 残りを鏡像ペアでちょうど埋められるように偶奇を合わせる
+    for (let d = 0; d < k; d++) {
+      const t = (d + 0.5 + rnd(-0.25, 0.25)) / k * W;
+      sites.push([t, t]); mirror.push(sites.length - 1);
+    }
+    const margin = W / Math.sqrt(n) * 0.5;
+    while (sites.length < n) {
+      const x = rnd(0, W), y = rnd(0, H);
+      if (Math.abs(x - y) < margin || !tryPoint(x, y)) continue;
+      const a = sites.length;
+      sites.push([x, y], [y, x]); mirror.push(a + 1, a);
+    }
+  } else {
+    while (sites.length < n) {
+      const x = rnd(0, W), y = rnd(0, H);
+      if (tryPoint(x, y)) { sites.push([x, y]); mirror.push(sites.length - 1); }
+    }
+  }
+  for (let it = 0; it < lloydIters; it++) {
+    const cents = sites.map((_, i) => polyCentroid(clipCell(sites, i)));
+    if (symmetric) {
+      sites = sites.map((_, i) => {
+        const a = cents[i], b = cents[mirror[i]];
+        return [(a[0] + b[1]) / 2, (a[1] + b[0]) / 2];
+      });
+    } else sites = cents;
+  }
+  const ok = stretchShortEdges(sites, mirror, n, symmetric);
+  cells = sites.map((s, i) => {
+    const poly = clipCell(sites, i);
+    const nb = new Set(), sides = new Set();
+    for (let k = 0; k < poly.length; k++) {
+      const p = poly[k], q = poly[(k + 1) % poly.length];
+      if (Math.hypot(q.x - p.x, q.y - p.y) < 1e-6) continue;
+      if (p.l >= 0) nb.add(p.l); else sides.add(p.l);
+    }
+    return { site: s, poly, nb, sides, mirror: mirror[i] };
+  });
+  // 隣接関係を対称に揃える（数値誤差対策）
+  cells.forEach((c, i) => c.nb.forEach(j => cells[j].nb.add(i)));
+  return ok;
+}
+
+// ---------- ゲームロジック ----------
+function touches(i, side) { return cells[i].sides.has(side); }
+
+function findWinPath(p, own = owner) {
+  const [a, b] = GOALS[p];
+  const prev = new Map(), q = [];
+  cells.forEach((_, i) => { if (own[i] === p && touches(i, a)) { prev.set(i, -1); q.push(i); } });
+  while (q.length) {
+    const i = q.shift();
+    if (touches(i, b)) { const path = []; for (let k = i; k !== -1; k = prev.get(k)) path.push(k); return path; }
+    for (const j of cells[i].nb) if (own[j] === p && !prev.has(j)) { prev.set(j, i); q.push(j); }
+  }
+  return null;
+}
+
+function play(i) {
+  if (!started || winner || owner[i] !== EMPTY) return;
+  owner[i] = turn;
+  history.push({ i, type: "move", player: turn });
+  const path = findWinPath(turn);
+  if (path) { winner = turn; winPath = path; }
+  else turn = 3 - turn;
+  render();
+  scheduleCpu();
+}
+
+function canSwap() {
+  return $("swap").checked && !winner && history.length === 1 && history[0].type === "move";
+}
+
+function doSwap() {
+  if (!canSwap()) return;
+  const i = history[0].i;
+  owner[i] = BLUE;
+  history.push({ i, type: "swap" });
+  turn = RED;
+  render();
+  scheduleCpu();
+}
+
+function undo() {
+  cancelCpu();
+  const cp = cpuPlayer();
+  if (isWatch()) paused = true;   // 観戦中に戻したら、そこで止めて盤面を見られるように
+  // CPU 戦では「自分の手番に戻る」ように戻す
+  const steps = !cp ? 1 : winner ? 2 : turn === cp ? 1 : 2;
+  for (let s = 0; s < steps && history.length; s++) {
+    const h = history.pop();
+    if (h.type === "swap") { owner[h.i] = RED; turn = BLUE; }
+    else { owner[h.i] = EMPTY; turn = h.player; }
+  }
+  winner = 0; winPath = []; cpuInfo = "";
+  render();
+  scheduleCpu();
+}
+
+// start = false なら盤を空にして「開始待ち」にする（設定変更・新しい盤面のとき）
+let started = false;
+function resetGame(start = false) {
+  cancelCpu();
+  started = start;
+  owner = cells.map(() => EMPTY);
+  history = []; turn = RED; winner = 0; winPath = []; cpuInfo = ""; paused = false;
+  render();
+  scheduleCpu();
+}
+
+// ---------- CPU（最短経路の差で評価する1手読み） ----------
+// 人間 vs CPU のときの CPU 側（2人対戦・観戦では 0）
+function cpuPlayer() {
+  const m = $("mode").value;
+  return m === "cpu2" ? BLUE : m === "cpu1" ? RED : 0;
+}
+const isWatch = () => $("mode").value === "watch";
+const isCpu = p => isWatch() || cpuPlayer() === p;
+let paused = false;
+
+// p が勝つまでに最低あと何個置く必要があるか（0-1 ダイクストラ）
+function distance(p, own) {
+  const [a, b] = GOALS[p];
+  const n = cells.length, d = new Array(n).fill(Infinity);
+  const cost = i => own[i] === p ? 0 : own[i] === EMPTY ? 1 : Infinity;
+  const dq = [];
+  for (let i = 0; i < n; i++) if (touches(i, a) && cost(i) < Infinity) {
+    d[i] = cost(i); d[i] === 0 ? dq.unshift(i) : dq.push(i);
+  }
+  let best = Infinity;
+  while (dq.length) {
+    const i = dq.shift();
+    if (touches(i, b)) best = Math.min(best, d[i]);
+    for (const j of cells[i].nb) {
+      const c = cost(j); if (c === Infinity) continue;
+      const nd = d[i] + c;
+      if (nd < d[j]) { d[j] = nd; c === 0 ? dq.unshift(j) : dq.push(j); }
+    }
+  }
+  return best;
+}
+
+function cpuMove() {
+  const me = turn, op = 3 - me;
+  // 初手は中央付近に
+  if (history.length === 0) {
+    let best = 0, bd = Infinity;
+    cells.forEach((c, i) => { const d = Math.hypot(c.site[0] - W / 2, c.site[1] - H / 2) + Math.random() * 40; if (d < bd) { bd = d; best = i; } });
+    return play(best);
+  }
+  let best = -1, bestScore = -Infinity;
+  const own = owner.slice();
+  for (let i = 0; i < cells.length; i++) {
+    if (own[i] !== EMPTY) continue;
+    own[i] = me;
+    if (findWinPath(me, own)) { own[i] = EMPTY; return play(i); }
+    const myD = distance(me, own);
+    own[i] = op;                     // 相手にとっての急所も加味
+    const opIfTaken = distance(op, own);
+    own[i] = me;
+    const opD = distance(op, own);
+    own[i] = EMPTY;
+    const score = (opD - myD) * 10 + (opD - opIfTaken) * 3 + Math.random();
+    if (score > bestScore) { bestScore = score; best = i; }
+  }
+  if (best >= 0) play(best);
+}
+
+// ---------- 思考エンジンの呼び出し（Web Worker で裏で考える） ----------
+let worker = null, workerOk = true, localEngine = null, graph = null;
+let thinkId = 0, thinking = false, cpuInfo = "";
+const pending = new Map();
+
+function startWorker() {
+  if (!workerOk) return;
+  try {
+    const src = $("engine").textContent +
+      "\nlet eng; onmessage = e => { const d = e.data;" +
+      " if (d.type === 'init') eng = HexEngine(d.graph);" +
+      " else postMessage({ id: d.id, res: eng.think(d.board, d.toMove, d.time, d.mode) }); };";
+    worker = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
+    worker.onmessage = e => { const cb = pending.get(e.data.id); pending.delete(e.data.id); cb && cb(e.data.res); };
+    worker.onerror = () => {   // Worker が使えない環境ならメインスレッドで考える
+      workerOk = false; worker = null;
+      const jobs = [...pending.values()]; pending.clear();
+      jobs.forEach(j => j.retry && j.retry());
+    };
+    if (graph) worker.postMessage({ type: "init", graph });
+  } catch (e) { workerOk = false; worker = null; }
+}
+
+function setGraph() {
+  graph = { n: cells.length, adj: cells.map(c => [...c.nb]), sides: cells.map(c => [...c.sides]) };
+  localEngine = null;
+  if (worker) worker.postMessage({ type: "init", graph });
+}
+
+function requestThink(job, cb) {
+  if (worker) {
+    const wrapped = res => cb(res);
+    wrapped.retry = () => requestThink(job, cb);
+    pending.set(job.id, wrapped);
+    worker.postMessage({ type: "think", ...job });
+  } else {
+    setTimeout(() => {
+      if (job.id !== thinkId) return;
+      localEngine = localEngine || HexEngine(graph);
+      cb(localEngine.think(job.board, job.toMove, job.time, job.mode));
+    }, 50);
+  }
+}
+
+function cancelCpu() {
+  clearTimeout(cpuTimer);
+  thinkId++;
+  if (thinking && worker) { worker.terminate(); worker = null; pending.clear(); startWorker(); }
+  thinking = false;
+}
+
+function scheduleCpu() {
+  clearTimeout(cpuTimer);
+  const cp = turn;
+  if (!started || !isCpu(cp) || winner || (isWatch() && paused)) return;
+  const time = +(isWatch() && cp === BLUE ? $("levelBlue") : $("level")).value;
+  const label = isWatch() ? NAME[cp] + "CPU" : "CPU";
+  if (time > 0) {
+    const mode = canSwap() && cp === BLUE ? "swapDecide"
+      : history.length === 0 && $("swap").checked ? "balanced" : "best";
+    const id = ++thinkId;
+    thinking = true; render();
+    requestThink({ id, board: Int8Array.from(owner), toMove: turn, time, mode }, res => {
+      if (id !== thinkId) return;
+      thinking = false;
+      const wr = Math.round(res.winrate * 100);
+      const detail = `${res.iters.toLocaleString()} 局をシミュレーション、${label} の勝率予想 ${wr}%`;
+      cpuInfo = mode === "balanced" ? `${label}：スワップされても互角になりそうな初手を選びました`
+        : res.swap ? `${label} はスワップしました（${detail}）` : `${label} の読み：${detail}`;
+      if (res.swap) doSwap(); else play(res.move);
+    });
+    return;
+  }
+  cpuTimer = setTimeout(() => {
+    cpuInfo = isWatch() ? `${label}：1手読みで打ちました` : cpuInfo;
+    // CPU が後手ならスワップするか判断（初手が中央寄りならもらう）
+    if (canSwap() && cp === BLUE) {
+      const s = cells[history[0].i].site;
+      if (Math.hypot(s[0] - W / 2, s[1] - H / 2) < W * 0.28) return doSwap();
+    }
+    cpuMove();
+  }, isWatch() ? 600 : 350);
+}
+
+// ---------- 描画 ----------
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  parent && parent.appendChild(e);
+  return e;
+}
+
+let polys = [];
+function buildBoard() {
+  svg.innerHTML = "";
+  const t = 10;
+  el("rect", { x: -t, y: -t, width: W + 2 * t, height: t, fill: "var(--red)" }, svg);
+  el("rect", { x: -t, y: H, width: W + 2 * t, height: t, fill: "var(--red)" }, svg);
+  el("rect", { x: -t, y: 0, width: t, height: H, fill: "var(--blue)" }, svg);
+  el("rect", { x: W, y: 0, width: t, height: H, fill: "var(--blue)" }, svg);
+  // 角は両色の三角に
+  for (const [cx, cy, sx, sy] of [[0, 0, -1, -1], [W, 0, 1, -1], [W, H, 1, 1], [0, H, -1, 1]]) {
+    el("polygon", { points: `${cx},${cy} ${cx + sx * t},${cy + sy * t} ${cx + sx * t},${cy}`, fill: "var(--blue)" }, svg);
+  }
+  const g = el("g", {}, svg);
+  polys = cells.map((c, i) => {
+    const p = el("polygon", { points: c.poly.map(v => `${v.x},${v.y}`).join(" "), class: "cell empty" }, g);
+    p.addEventListener("click", () => { if (!isCpu(turn)) play(i); });
+    p.addEventListener("mouseenter", () => {
+      if (started && !winner && owner[i] === EMPTY && !isCpu(turn)) p.classList.add(turn === RED ? "preview-r" : "preview-b");
+    });
+    p.addEventListener("mouseleave", () => p.classList.remove("preview-r", "preview-b"));
+    return p;
+  });
+}
+
+function render() {
+  const last = history.length ? history[history.length - 1].i : -1;
+  const win = new Set(winPath);
+  polys.forEach((p, i) => {
+    p.setAttribute("class", "cell " + (owner[i] === RED ? "p1" : owner[i] === BLUE ? "p2" : "empty")
+      + (i === last && !winner ? " last" : "") + (win.has(i) ? " win" : ""));
+  });
+  // 勝ち筋のセルを最前面に
+  winPath.forEach(i => polys[i].parentNode.appendChild(polys[i]));
+  if (!winner && last >= 0) polys[last].parentNode.appendChild(polys[last]);
+
+  const st = $("status");
+  const cp = cpuPlayer(), watch = isWatch();
+  const who = p => NAME[p] + (watch || cp === p ? "（CPU）" : cp ? "（あなた）" : "");
+  if (winner) { st.textContent = `${who(winner)}の勝ち！`; }
+  else if (thinking) st.textContent = `${who(turn)}が考え中…`;
+  else if (watch && paused) st.textContent = `一時停止中（次は${NAME[turn]}）`;
+  else st.textContent = `${who(turn)}の番` + (canSwap() && !isCpu(BLUE) ? " — スワップ可" : "");
+  st.className = "status " + ((winner || turn) === RED ? "red" : "blue");
+  $("info").textContent = cp || watch ? cpuInfo : "";
+
+  if (!started) { st.textContent = "設定を選んで「ゲーム開始」を押してください"; st.className = "status"; }
+  $("startBtn").textContent = !started ? "ゲーム開始" : winner ? "同じ盤面でもう一度" : "中断する";
+  $("startBtn").className = started && !winner ? "secondary" : "";
+  $("undoBtn").disabled = !started || history.length === 0;
+  $("swapBtn").disabled = !canSwap() || isCpu(BLUE);
+  $("watchOnly").hidden = !watch;
+  $("levelLabel").textContent = watch ? "赤CPUの強さ" : "CPUの強さ";
+  $("pauseBtn").textContent = paused ? "再開" : "一時停止";
+  $("pauseBtn").disabled = !started || !!winner;
+}
+
+function newBoard() {
+  cancelCpu();
+  generate(+$("n").value, +$("lloyd").value, $("sym").checked);
+  setGraph();
+  buildBoard();
+  resetGame();
+}
+
+// ---------- UI ----------
+const syncLabels = () => { $("nVal").textContent = $("n").value; $("lVal").textContent = $("lloyd").value; };
+$("n").addEventListener("input", syncLabels);
+$("lloyd").addEventListener("input", syncLabels);
+$("n").addEventListener("change", newBoard);
+$("lloyd").addEventListener("change", newBoard);
+$("sym").addEventListener("change", newBoard);
+$("mode").addEventListener("change", () => resetGame(false));
+// 開始待ち・終局後 → 開始、対局中 → 中断して開始待ちへ
+$("startBtn").addEventListener("click", () => resetGame(!started || !!winner));
+$("pauseBtn").addEventListener("click", () => {
+  paused = !paused;
+  if (paused) cancelCpu();
+  render();
+  scheduleCpu();
+});
+$("levelBlue").addEventListener("change", () => { if (thinking) { cancelCpu(); scheduleCpu(); } });
+$("swap").addEventListener("change", render);
+$("newBtn").addEventListener("click", newBoard);
+$("undoBtn").addEventListener("click", undo);
+$("swapBtn").addEventListener("click", doSwap);
+$("level").addEventListener("change", () => { if (thinking) { cancelCpu(); scheduleCpu(); } });
+syncLabels();
+startWorker();
+newBoard();
+</script>
+</body>
+</html>
